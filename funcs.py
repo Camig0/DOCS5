@@ -2,6 +2,74 @@ from docx import  Document
 import tkinter
 from tkinter import filedialog
 from bs4 import BeautifulSoup
+from dataclasses import dataclass
+
+#TODO: comments/documentation
+
+
+
+@dataclass
+class DocList:
+    rootParagraph:any
+    ...
+
+
+@dataclass
+class DocRun:
+    rootParagraph:any
+    element:dict
+    
+
+    def __init__(self, _rootParagraph, _element):
+        self.rootParagraph = _rootParagraph
+        self.element:str = _element.get('element')
+        parent_tags:tuple[dict] = _element.get('parent_tags')
+
+        #1. get styles of the element
+
+        styles:dict =  { #defaults should be set here #FUTURE
+            'bold': False, #bool
+            'italic': False, #bool
+            'underline':False, #bool
+            'highlight': None, #int from 1-5;
+            'color': 'black', #TODO: figure out what colors are available 
+            'font_size': 12, #int
+        }
+
+        for parent_tag in parent_tags:
+            #split attributes to key to value ex. -> attributes = [('bold', True), ('italic', True), ('underline', True)]
+            attributes:list = parent_tag[0].get('attributes') 
+            attributes = [tuple(v.split('=')) for v in attributes]
+
+            for key, value in attributes:
+                if key not in styles:
+                    continue #filters the attributes that are not in the styles dictionary
+                elif value.lower() == 'true':
+                    styles[key] = True
+                elif value.lower() == 'false':
+                    styles[key] = False
+                elif value.isdigit():
+                    styles[key] = int(value)
+                else:
+                    styles[key] = value
+                 
+                                                                    #Continue tweaking here until desired result
+                                                                    #TODO: add checks for more flexibility
+                                                                    #       - case sensitivity -> make it not case sensitive
+                                                                    #       - attribute separation -> spaces
+                                                                    #       - 
+                styles[key] = value
+        
+        self.styles = styles
+
+        #2. execute styles
+
+    def addtoRoot(self):
+        #using the styles given apply them to a run in a paragraph
+        #TODO: do this here :)
+        ...
+    ...
+
 
 #goal of this file is to make a word document from given tags
 
@@ -186,9 +254,7 @@ def pair_tags(tags:list[dict[str, any]]) ->list[tuple[dict[str, any], dict[str, 
     pass
     return paired_tags
 
-
-
-def get_elements(tags:list[tuple[dict,dict]], text:str) -> list[dict[str, tuple[int, int] | list[id]]]:
+def get_elements(tags:list[tuple[dict,dict]], text:str) -> list[dict[str, tuple[int, int]]]:
     """
     Extracts elements from the given text and their corresponding parent tags.
 
@@ -245,8 +311,6 @@ def get_elements(tags:list[tuple[dict,dict]], text:str) -> list[dict[str, tuple[
         range_start: int = None
         _tag_pair_container: dict[str, id | tuple[int, int]] = {}
 
-
-
         if tag_pair[0].get('structure') == 'self-closing':
             continue
 
@@ -283,7 +347,7 @@ def get_elements(tags:list[tuple[dict,dict]], text:str) -> list[dict[str, tuple[
                 _text[i] = '*'
 
             _text = ''.join(_text)
-            element_range = {'element': element, 'range': (current_index, end_index)}
+            element_range:dict = {'element': element, 'range': (current_index, end_index)}
             elements_ranges.append(element_range)
             prev_index = current_index
 
@@ -309,23 +373,30 @@ def get_elements(tags:list[tuple[dict,dict]], text:str) -> list[dict[str, tuple[
     return elements_ranges 
     # AFTER THIS FUNCTION IS EXECUTED ALL THAT NEEDS TO BE DONE IS FOR EACH ELEMENT TO BE INSTANTIATED AS A
 
-def docElementinstantiator(elements,tags,document):
+def docElementinstantiator(elements,tags,document) -> None:
     #PHASE 1:
-    #first separate each element into groups based on its first paragraph parent
+    #first separate each element into groups based on its first paragraph parent and if its a list
     # make sure that elements maintain chronological order
-    #NOTE never have nested paragraph
+    #NOTE never have nested paragraph or a list in p tag or a list in a list tag
 
-    paragraphTags=  [tag for tag in tags if tag[0].get('type') == 'p'] #puts all paragraph tags in a list
+    paragraphTags = [tag for tag in tags if tag[0].get('type') in ('p', 'list')] #puts all paragraph tags in a list
 
     paragraph_groups = []
+    list_groups = []
     for paragraphTag in paragraphTags:
         pTag_range = (paragraphTag[0].get('start'), paragraphTag[1].get('end'))
+        isList = paragraphTag[0].get('type') == 'list'
         same_parent_paragraph = []
-        for element in elements:
+        for i, element in enumerate(elements):
+            isLastiteration = i == len(elements) - 1
             element_range = element.get('range')
             if pTag_range[0] < element_range[0] < pTag_range[1] and pTag_range[1] > element_range[1] > pTag_range[0]: #Basically, if range (w,x) is within (y,z)
                 same_parent_paragraph.append(element)
-        paragraph_groups.append(same_parent_paragraph)
+            
+            if isLastiteration and isList:
+                list_groups.append(same_parent_paragraph)
+            elif isLastiteration and not isList:
+                paragraph_groups.append(same_parent_paragraph)
                 
 
     ...
@@ -336,14 +407,41 @@ def docElementinstantiator(elements,tags,document):
     instantiatedParagraphs = []
     for paragraphGroup in paragraph_groups:
         docParagraph = document.add_paragraph() #FOR FUTURE PURPOSES: if need be add paragraph styles here
-        instantiatedParagraphs.append({'paragraph': docParagraph, 'elements': paragraphGroup})
-
+        instantiatedParagraphs.append({'paragraph': docParagraph, 'elements': paragraphGroup, 'list': False})
+    for listGroup in list_groups:
+        docParagraph = document.add_paragraph()
+        instantiatedParagraphs.append({'paragraph': docParagraph, 'elements': listGroup, 'list': True})
+    ...
 
     #PHASE 3:
     #In this phase the actual elements are being created in the file itself
     #assuming that the code for the actual creation is already made (done in a class)
-    #The only purpose of this phase is to ensure that they are made in the correct order
+    #The only purpose of this phase is to ensure that they are made in the correct order\
+    
+    def create_docList(paragrpah, elements, list_style='bullet'):
+        ORDERED:list[str] = ['num', 'alpha', '_alpha', 'roman', '_roman'] 
+        #num: numbered 123456  alpha: ABCDEF _alpha: abcdef roman: I II III IV _roman :i ii iii vi 
+        UNORDERED:list['str'] = ['dash', 'bullet', 'hollow_bullet']
+        # dash: -  bullet: • hollow_bullet: ο
 
+        if list_style in ORDERED:
+            ...
+        elif list_style in UNORDERED:
+            ...
+        else:
+            raise ValueError (f'List style is {list_style} expected {zip(ORDERED,UNORDERED)}')
+        
+
+    for paragraphInstance in instantiatedParagraphs:
+        paragraph = paragraphInstance.get('paragraph')
+        child_elements = paragraph.get('elements')
+        if paragraphInstance.get('list'):
+            ... #TODO: create a list class where when given parent paragraph(that acts like a list) and child elements 
+            # with given parent elements it creates a list ex. docList(paragraphInstance, elements, list style)
+        elif not paragraphInstance.get('list'):
+            for run in child_elements:
+                ... #TODO: create Run class where when given parent tags and element content it creates run in the doc
+                    #docRun(rootParagraph, element))
 
     pass
 
@@ -363,34 +461,17 @@ def create_document():
     doc.save(fr'{save_directory}/{file_name}')
 
 text = '''
-<tag1>
-    more
-    <tag2>
-        foo
-        <p>
-        more
-            <testtag1>
-             test1
-                <testtag1>
-                    test2
-                </testtag1>
-                <testtag1>
-                    test3
-                    <testtag1>
-                        test4
-                    </testtag1>
-                    test5
-                </testtag1>
-            </testtag1>
-        </p>
-    
-        <p>
-        trick
-        </p>
-        foo
-    </tag2>
-    split
-</tag1>
+<list>
+    <li>some list item1</li>
+    <li>some list item2</li>
+    <li>some list item3</li>
+    <li>some list item4</li>
+</list>
+<p bold, italic, underline, highlight=somehighlight, color=white, font_size=12>
+ <p>
+    some paragraph
+  </p>
+</p>
 '''
 
 TEMPORARYDOCUMENT = Document()
